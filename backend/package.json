@@ -1,0 +1,36 @@
+{
+  "name": "sundebt-backend",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "dev:worker": "tsx watch src/temporal/worker.ts",
+    "start": "node dist/server.js",
+    "start:worker": "node dist/temporal/worker.js",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test src/temporal/reward.test.ts src/sol/sol-service.test.ts"
+  },
+  "dependencies": {
+    "@mastra/core": "^1.75.0",
+    "@temporalio/client": "^1.24.0",
+    "@temporalio/worker": "^1.24.0",
+    "@temporalio/workflow": "^1.24.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "ollama-ai-provider-v2": "^4.0.1",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.3",
+    "@types/node": "^22.18.12",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3"
+  }
+}

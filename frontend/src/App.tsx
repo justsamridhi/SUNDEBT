@@ -1,7 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useStepCounter, useVisibility, useLightSensor, useCameraCheck } from './hooks';
 import {
-  loadWallet, saveWallet, getSolStage, getMission, computeConfidence,
+  completeSunSession, localGuidance, requestSolGuidance, sendSessionEvent, startSunSession,
+  type SessionEvent, type SolGuidance,
+} from './backend';
+import {
+  loadWallet, saveWallet, getSolStage, computeConfidence,
   CAP, STEP_BONUS_DIVISOR,
   type Wallet, type SessionLog,
 } from './wallet';
@@ -21,6 +25,7 @@ export default function App() {
   const setW = useCallback((fn: (prev: Wallet) => Wallet) => {
     _setW(prev => { const next = fn(prev); saveWallet(next); return next; });
   }, []);
+  const [guidance, setGuidance] = useState<SolGuidance>(() => localGuidance(w));
 
   // ─── Sensors ───
   const stepper = useStepCounter();
@@ -30,67 +35,142 @@ export default function App() {
 
   // ─── Session State ───
   const [phase, setPhase] = useState<SessionPhase>('idle');
-  const [sessionStart, setSessionStart] = useState(0);
   const [elapsed, setElapsed] = useState(0);
-  const [camReady, setCamReady] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [camLum, setCamLum] = useState<number | null>(null);
+  const [workflowWarning, setWorkflowWarning] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
-  const currentMission = getMission(w.sessions.length);
+  const elapsedBeforeSegment = useRef(0);
+  const activeSegmentStart = useRef(0);
+  const workflowIdRef = useRef<string | null>(null);
+  const workflowSetupRef = useRef<Promise<void>>(Promise.resolve());
+  const workflowActionsRef = useRef<Promise<void>>(Promise.resolve());
+  const currentMission = guidance.mission;
 
   // Elapsed timer during active session
   useEffect(() => {
-    if (phase === 'active') {
+    if (phase === 'active' && !isPaused) {
       timerRef.current = setInterval(() => {
-        setElapsed(Math.floor((Date.now() - sessionStart) / 1000));
+        setElapsed(Math.floor((elapsedBeforeSegment.current + Date.now() - activeSegmentStart.current) / 1000));
       }, 1000);
       return () => clearInterval(timerRef.current);
     }
-  }, [phase, sessionStart]);
+  }, [phase, isPaused]);
 
-  // ─── Session Flow ───
-  const beginSunCheck = async () => {
-    setPhase('suncheck');
-    setCamReady(false);
-    setCamLum(null);
-    if (videoRef.current && camera.supported) {
-      const ok = await camera.startCamera(videoRef.current);
+  useEffect(() => {
+    if (phase !== 'suncheck' || !camera.supported || !videoRef.current) return;
+    let cancelled = false;
+    let captureTimeout: ReturnType<typeof setTimeout> | undefined;
+    const video = videoRef.current;
+    void camera.startCamera(video).then(ok => {
+      if (cancelled) {
+        if (ok) camera.stopCamera();
+        return;
+      }
       if (ok) {
-        setCamReady(true);
-        // Capture luminance after 3 seconds
-        setTimeout(() => {
-          const l = camera.measureLuminance();
-          setCamLum(l);
+        captureTimeout = setTimeout(() => {
+          if (!cancelled) setCamLum(camera.measureLuminance());
         }, 3000);
       }
+    });
+    return () => {
+      cancelled = true;
+      if (captureTimeout) clearTimeout(captureTimeout);
+    };
+  }, [phase, camera.supported, camera.startCamera, camera.stopCamera, camera.measureLuminance]);
+
+  const queueWorkflowEvent = (event: SessionEvent) => {
+    workflowActionsRef.current = workflowActionsRef.current
+      .then(async () => {
+        await workflowSetupRef.current;
+        const workflowId = workflowIdRef.current;
+        if (workflowId) await sendSessionEvent(workflowId, event);
+      })
+      .catch(error => {
+        console.warn('Temporal session event could not be recorded:', error);
+        setWorkflowWarning('Durable session updates are unavailable; this session continues locally.');
+      });
+  };
+
+  // ─── Session Flow ───
+  const beginSunCheck = () => {
+    if (camera.supported && videoRef.current) {
+      void camera.startCamera(videoRef.current);
     }
+    setPhase('suncheck');
+    setCamLum(null);
+    setWorkflowWarning(null);
+    workflowIdRef.current = null;
+    workflowActionsRef.current = Promise.resolve();
+    workflowSetupRef.current = (async () => {
+      const nextGuidance = await requestSolGuidance(w);
+      setGuidance(nextGuidance);
+      try {
+        workflowIdRef.current = await startSunSession(nextGuidance);
+      } catch (error) {
+        console.warn('Temporal session unavailable; continuing locally:', error);
+        setWorkflowWarning('Durable session unavailable; your Sun Session can still run locally.');
+      }
+    })();
   };
 
   const proceedToConditions = () => {
     camera.stopCamera();
+    queueWorkflowEvent({
+      type: 'sun-check',
+      evidence: {
+        cameraLum: camLum,
+        lightLux: light.lux,
+        confidence: computeConfidence(light.lux, camLum),
+      },
+    });
     setPhase('conditions');
   };
 
   const startActiveSession = () => {
-    setSessionStart(Date.now());
+    elapsedBeforeSegment.current = 0;
+    activeSegmentStart.current = Date.now();
     setElapsed(0);
-    stepper.start();
+    setIsPaused(false);
+    queueWorkflowEvent({ type: 'phone-down' });
+    void stepper.start();
     vis.start();
     light.start();
     setPhase('active');
   };
 
+  const pauseSession = () => {
+    elapsedBeforeSegment.current += Date.now() - activeSegmentStart.current;
+    setElapsed(Math.floor(elapsedBeforeSegment.current / 1000));
+    stepper.stop();
+    vis.stop();
+    light.stop();
+    setIsPaused(true);
+    queueWorkflowEvent({ type: 'interrupted' });
+  };
+
+  const resumeSession = () => {
+    activeSegmentStart.current = Date.now();
+    void stepper.start(false);
+    vis.start(false);
+    light.start();
+    setIsPaused(false);
+    queueWorkflowEvent({ type: 'resumed' });
+  };
+
   const completeSession = () => {
+    if (!isPaused) elapsedBeforeSegment.current += Date.now() - activeSegmentStart.current;
+    const durationMins = Math.max(0, Math.floor(elapsedBeforeSegment.current / 60000));
     stepper.stop();
     vis.stop();
     light.stop();
     clearInterval(timerRef.current);
 
-    const durationMins = Math.max(0, Math.floor((Date.now() - sessionStart) / 60000));
     const earned = Math.min(durationMins, CAP - w.earnedToday);
     const scrollBonus = Math.floor(stepper.steps / STEP_BONUS_DIVISOR);
     const totalEarned = Math.min(earned + scrollBonus, CAP - w.earnedToday);
-    const conf = computeConfidence(light.lux, camLum, stepper.supported);
+    const conf = computeConfidence(light.lux, camLum);
     const visData = vis.getSeconds();
     const xp = totalEarned * 2;
 
@@ -121,8 +201,28 @@ export default function App() {
       solXP: prev.solXP + xp,
       sessions: [log, ...prev.sessions].slice(0, 20),
     }));
+    setGuidance(localGuidance({ ...w, sessions: [log, ...w.sessions] }));
+
+    workflowActionsRef.current = workflowActionsRef.current
+      .then(async () => {
+        await workflowSetupRef.current;
+        const workflowId = workflowIdRef.current;
+        if (workflowId) {
+          await completeSunSession(workflowId, {
+            durationMinutes: durationMins,
+            steps: stepper.supported ? stepper.steps : null,
+            earnedToday: w.earnedToday,
+            sunDebt: w.sunDebt,
+          });
+        }
+      })
+      .catch(error => {
+        console.warn('Temporal reward could not be recorded; local reward was applied:', error);
+        setWorkflowWarning('The durable reward record is unavailable; your local Sun Minutes and Sol XP were saved.');
+      });
 
     setPhase('idle');
+    setIsPaused(false);
     setTab('debrief');
   };
 
@@ -249,7 +349,15 @@ export default function App() {
         <p className="sub" style={{ position: 'relative', zIndex: 2 }}>
           {camera.supported ? 'Point your camera toward the sky for 3 seconds.' : 'Camera unavailable. We\'ll credit your time.'}
         </p>
+        <p className="note" style={{ position: 'relative', zIndex: 2 }}>
+          Sensor readings are optional context, not proof that you are outdoors or a health measurement.
+        </p>
         <video ref={videoRef} autoPlay playsInline muted style={{ width: '100%', maxWidth: 300, borderRadius: 16, position: 'relative', zIndex: 2, display: camera.supported ? 'block' : 'none' }} />
+        {camera.error && (
+          <p className="note" style={{ position: 'relative', zIndex: 2 }}>
+            Camera unavailable ({camera.error}). You can continue without it.
+          </p>
+        )}
         {camLum !== null && (
           <p style={{ position: 'relative', zIndex: 2, marginTop: 16 }}>
             Luminance: <b>{camLum.toFixed(0)}</b>/255 {camLum > 180 ? '— bright ☀️' : camLum > 100 ? '— moderate' : '— low'}
@@ -268,9 +376,16 @@ export default function App() {
         <h2>Before You Go</h2>
         <div className="card" style={{ textAlign: 'left', maxWidth: 340, margin: '24px auto', background: 'rgba(255,255,255,0.3)' }}>
           <p style={{ margin: 0 }}>🌿 <b>Mission:</b> {currentMission}</p>
+          <p style={{ margin: '8px 0 0' }}>Suggested duration: <b>{guidance.recommendedDurationMinutes} minutes</b></p>
+          <p style={{ margin: '8px 0 0' }}>{guidance.motivation}</p>
         </div>
+        {guidance.source === 'fallback' && (
+          <p className="note">Sol is using a deterministic offline mission.</p>
+        )}
+        {workflowWarning && <p className="note">{workflowWarning}</p>}
+        <p className="note">Step estimates may need device permission and are optional; the session works without them.</p>
         <p className="sub" style={{ position: 'relative', zIndex: 2 }}>
-          Your timer starts now. Put the phone down and enjoy the sun.
+          Your timer starts now. Put the phone down and enjoy the outdoors. Sensor readings are optional and do not verify exposure.
         </p>
         <button className="primary" onClick={startActiveSession} style={{ marginTop: 24, position: 'relative', zIndex: 2 }}>
           Start Session
@@ -284,9 +399,15 @@ export default function App() {
       <div className="session-overlay">
         <div className="session-sun-icon">☀️</div>
         <h1>PUT YOUR PHONE AWAY.</h1>
-        <p>GO GET SOME SUN.</p>
+        <p>GO GET SOME FRESH AIR.</p>
         <div className="session-timer">{fmtTime(elapsed)}</div>
-        <button onClick={completeSession} style={{ position: 'relative', zIndex: 2, marginTop: 40 }}>
+        {isPaused && <p className="note">Session paused. Resume when you are ready to continue.</p>}
+        {workflowWarning && <p className="note">{workflowWarning}</p>}
+        {light.error && <p className="note">Ambient light reading unavailable: {light.error}</p>}
+        <button onClick={isPaused ? resumeSession : pauseSession} style={{ position: 'relative', zIndex: 2, marginTop: 32 }}>
+          {isPaused ? 'Resume Session' : 'Pause Session'}
+        </button>
+        <button onClick={completeSession} style={{ position: 'relative', zIndex: 2, marginTop: 12 }}>
           Complete Session
         </button>
       </div>
@@ -296,6 +417,7 @@ export default function App() {
   return (
     <>
       <main>
+        <video ref={videoRef} autoPlay playsInline muted aria-hidden="true" style={{ display: 'none' }} />
         <header className="app-header">
           <img src="/icon.svg" alt="SUNDEBT" className="app-logo" />
           <h1>SUNDEBT</h1>
@@ -453,6 +575,7 @@ export default function App() {
               <h2>Session Debrief</h2>
               <p className="sub">Welcome back.</p>
             </div>
+            {workflowWarning && <div className="card note" role="status">{workflowWarning}</div>}
             {w.sessions.length === 0 ? (
               <div className="card" style={{ textAlign: 'center' }}>
                 <p className="sol-avatar" style={{ margin: '0 auto 16px', fontSize: 48 }}>🌱</p>
@@ -467,7 +590,7 @@ export default function App() {
                     <div className="debrief-number">+{last.earned}</div>
                     <div className="debrief-label">Sun Minutes Earned</div>
                     <div className="debrief-number secondary-number">{last.duration}</div>
-                    <div className="debrief-label">Minutes Outside</div>
+                    <div className="debrief-label">Minutes in Session</div>
                   </div>
 
                   <div className="card debrief-details">
@@ -476,8 +599,10 @@ export default function App() {
                       <b>{last.stepsSupported ? `~${last.steps} (estimated)` : 'Unavailable'}</b>
                     </div>
                     <div className="debrief-row">
-                      <span>Sun Confidence</span>
-                      <b className={last.conf === 'confirmed' ? 'ok' : last.conf === 'estimated' ? '' : 'muted'}>{last.conf}</b>
+                      <span>Sensor Evidence</span>
+                      <b className={last.conf === 'unavailable' ? 'muted' : ''}>
+                        {last.conf === 'confirmed' ? 'bright reading (not proof)' : last.conf}
+                      </b>
                     </div>
                     <div className="debrief-row">
                       <span>Sol XP</span>
@@ -513,7 +638,9 @@ export default function App() {
                     <div className="card" style={{ marginTop: 16 }}>
                       <h3>History</h3>
                       {w.sessions.slice(1, 6).map((s, i) => (
-                        <p key={i} className="sub">{s.date} — {s.duration} min — +{s.earned} SM — {s.conf}</p>
+                        <p key={i} className="sub">
+                          {s.date} — {s.duration} min — +{s.earned} SM — {s.conf === 'confirmed' ? 'bright reading (not proof)' : s.conf}
+                        </p>
                       ))}
                     </div>
                   )}

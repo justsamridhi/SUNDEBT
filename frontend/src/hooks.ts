@@ -7,12 +7,40 @@ export function useStepCounter() {
   const lastMag = useRef(0);
   const rising = useRef(false);
   const active = useRef(false);
+  const listener = useRef<((event: DeviceMotionEvent) => void) | null>(null);
 
-  const start = useCallback(() => {
-    setSteps(0);
+  const start = useCallback(async (reset = true) => {
+    if (reset) {
+      setSteps(0);
+      lastMag.current = 0;
+      rising.current = false;
+    }
     active.current = true;
-    if (typeof DeviceMotionEvent === 'undefined') return;
-    setSupported(true);
+    if (typeof DeviceMotionEvent === 'undefined') {
+      setSupported(false);
+      return false;
+    }
+
+    const permissionAwareEvent = DeviceMotionEvent as typeof DeviceMotionEvent & {
+      requestPermission?: () => Promise<'granted' | 'denied'>;
+    };
+    if (permissionAwareEvent.requestPermission) {
+      try {
+        const permission = await permissionAwareEvent.requestPermission();
+        if (permission !== 'granted') {
+          active.current = false;
+          setSupported(false);
+          return false;
+        }
+      } catch {
+        active.current = false;
+        setSupported(false);
+        return false;
+      }
+    }
+
+    if (!active.current) return false;
+    if (listener.current) window.removeEventListener('devicemotion', listener.current);
 
     const handler = (e: DeviceMotionEvent) => {
       if (!active.current) return;
@@ -28,11 +56,19 @@ export function useStepCounter() {
       }
       lastMag.current = mag;
     };
+    listener.current = handler;
     window.addEventListener('devicemotion', handler);
-    return () => window.removeEventListener('devicemotion', handler);
+    setSupported(true);
+    return true;
   }, []);
 
-  const stop = useCallback(() => { active.current = false; }, []);
+  const stop = useCallback(() => {
+    active.current = false;
+    if (listener.current) {
+      window.removeEventListener('devicemotion', listener.current);
+      listener.current = null;
+    }
+  }, []);
 
   return { steps, supported, start, stop };
 }
@@ -44,9 +80,11 @@ export function useVisibility() {
   const lastChange = useRef(Date.now());
   const tracking = useRef(false);
 
-  const start = useCallback(() => {
-    visibleMs.current = 0;
-    hiddenMs.current = 0;
+  const start = useCallback((reset = true) => {
+    if (reset) {
+      visibleMs.current = 0;
+      hiddenMs.current = 0;
+    }
     lastChange.current = Date.now();
     tracking.current = true;
   }, []);
@@ -85,20 +123,33 @@ export function useVisibility() {
 export function useLightSensor() {
   const [lux, setLux] = useState<number | null>(null);
   const [supported, setSupported] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const sensorRef = useRef<any>(null);
 
   const start = useCallback(() => {
     setLux(null);
-    if (!('AmbientLightSensor' in window)) return;
+    setError(null);
+    if (!('AmbientLightSensor' in window)) {
+      setSupported(false);
+      return;
+    }
     try {
       // @ts-ignore
       const sensor = new AmbientLightSensor({ frequency: 1 });
       sensor.addEventListener('reading', () => setLux(sensor.illuminance));
-      sensor.addEventListener('error', () => { /* sensor unavailable */ });
+      sensor.addEventListener('error', (event: any) => {
+        setError(event.error?.message ?? 'Ambient light sensor permission or access failed');
+        setSupported(false);
+        sensor.stop();
+        sensorRef.current = null;
+      });
       sensor.start();
       sensorRef.current = sensor;
       setSupported(true);
-    } catch (_e) { /* not available */ }
+    } catch (caught) {
+      setSupported(false);
+      setError(caught instanceof Error ? caught.message : 'Ambient light sensor unavailable');
+    }
   }, []);
 
   const stop = useCallback(() => {
@@ -108,29 +159,48 @@ export function useLightSensor() {
     }
   }, []);
 
-  return { lux, supported, start, stop };
+  return { lux, supported, error, start, stop };
 }
 
 // ─── Camera luminance check ───
 export function useCameraCheck() {
   const [supported] = useState(() => !!(navigator.mediaDevices?.getUserMedia));
+  const [error, setError] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const requestRef = useRef<Promise<MediaStream> | null>(null);
+
+  const stopCamera = useCallback(() => {
+    streamRef.current?.getTracks().forEach(t => t.stop());
+    streamRef.current = null;
+  }, []);
 
   const startCamera = useCallback(async (video: HTMLVideoElement) => {
     videoRef.current = video;
+    setError(null);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment', width: 320, height: 240 }
-      });
+      let stream = streamRef.current;
+      if (!stream) {
+        const request = requestRef.current ?? navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'environment', width: 320, height: 240 }
+          });
+        requestRef.current = request;
+        try {
+          stream = await request;
+          streamRef.current = stream;
+        } finally {
+          if (requestRef.current === request) requestRef.current = null;
+        }
+      }
       video.srcObject = stream;
       await video.play();
-      streamRef.current = stream;
       return true;
-    } catch (_e) {
+    } catch (caught) {
+      stopCamera();
+      setError(caught instanceof Error ? caught.message : 'Camera permission or access failed');
       return false;
     }
-  }, []);
+  }, [stopCamera]);
 
   const measureLuminance = useCallback((): number | null => {
     const video = videoRef.current;
@@ -149,10 +219,5 @@ export function useCameraCheck() {
     return sum / (64 * 48);
   }, []);
 
-  const stopCamera = useCallback(() => {
-    streamRef.current?.getTracks().forEach(t => t.stop());
-    streamRef.current = null;
-  }, []);
-
-  return { supported, startCamera, measureLuminance, stopCamera };
+  return { supported, error, startCamera, measureLuminance, stopCamera };
 }

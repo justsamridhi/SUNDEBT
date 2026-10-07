@@ -93,13 +93,9 @@ export function getMission(sessionCount: number) {
 
 export function computeConfidence(
   lux: number | null,
-  cameraLum: number | null,
-  stepsSupported: boolean
+  cameraLum: number | null
 ): 'confirmed' | 'estimated' | 'unavailable' {
-  // confirmed: light sensor reads bright sunlight OR camera luminance very high
-  if (lux !== null && lux > 1000) return 'confirmed';
-  if (cameraLum !== null && cameraLum > 180) return 'confirmed';
-  // estimated: any partial evidence
-  if (lux !== null || cameraLum !== null || stepsSupported) return 'estimated';
+  // Browser light readings are never proof of outdoor exposure.
+  if (lux !== null || cameraLum !== null) return 'estimated';
   return 'unavailable';
 }
