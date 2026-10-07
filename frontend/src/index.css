@@ -1,0 +1,364 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@400;500;600&display=swap');
+
+:root {
+  --paper: #fdfbf7;
+  --ink: #4a4238;
+  --ink-light: #7a7065;
+  --sun: #f4d068;
+  --sun-light: #fef5d4;
+  --amber: #d48a4d;
+  --leaf: #7b8e6f;
+  --card: #ffffff;
+  --border: rgba(74, 66, 56, 0.08);
+  --radius: 18px;
+  --nav-h: 68px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font: 16px/1.6 'Inter', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+  min-height: -webkit-fill-available;
+  overscroll-behavior: none;
+}
+
+/* ── Typography ── */
+h1, h2, h3 { font-family: 'Cormorant Garamond', Georgia, serif; font-weight: 600; }
+h1 { font-size: 26px; letter-spacing: 1px; }
+h2 { font-size: 21px; }
+h3 { font-size: 17px; }
+.sub { color: var(--ink-light); font-size: 14px; line-height: 1.5; }
+.ok { color: var(--leaf); }
+.muted { color: var(--ink-light); }
+.debt-color { color: var(--amber); }
+
+/* ── Layout ── */
+#root { display: flex; flex-direction: column; min-height: 100vh; }
+
+main {
+  flex: 1;
+  width: 100%;
+  max-width: 400px;
+  margin: 0 auto;
+  padding: 16px 16px calc(var(--nav-h) + 16px + env(safe-area-inset-bottom, 0px));
+}
+
+.app-header {
+  text-align: center;
+  padding: 4px 0 12px;
+}
+.app-logo { width: 44px; height: 44px; margin-bottom: 4px; opacity: 0.8; }
+.app-header h1 { margin-bottom: 2px; }
+
+.page-section { display: flex; flex-direction: column; gap: 14px; }
+.section-header { text-align: center; margin-bottom: 2px; }
+
+/* ── Cards ── */
+.card {
+  background: var(--card);
+  border-radius: var(--radius);
+  padding: 16px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.03);
+}
+
+/* ── Buttons ── */
+button {
+  font: 500 15px/1.2 'Inter', sans-serif;
+  border: none;
+  border-radius: 100px;
+  padding: 14px 20px;
+  cursor: pointer;
+  width: 100%;
+  transition: transform 0.12s ease, box-shadow 0.2s ease;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  -webkit-tap-highlight-color: transparent;
+}
+button:active { transform: scale(0.97); }
+button:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+button.primary { background: var(--ink); color: var(--paper); }
+button.primary:active { box-shadow: 0 2px 10px rgba(74,66,56,0.18); }
+button.secondary { background: transparent; color: var(--ink); border: 1.5px solid rgba(74,66,56,0.15); }
+.action-buttons { display: flex; flex-direction: column; gap: 10px; }
+
+/* ── Dashboard: Sun Orb ── */
+.sun-balance-container { display: flex; justify-content: center; padding: 8px 0 4px; }
+
+.sun-orb {
+  width: 160px; height: 160px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, var(--sun-light) 0%, var(--sun) 70%, var(--amber) 100%);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  box-shadow: 0 0 40px -8px rgba(244,208,104,0.45);
+  position: relative;
+  animation: orbPulse 6s ease-in-out infinite;
+}
+.sun-orb::after {
+  content: '';
+  position: absolute; inset: -14px;
+  border-radius: 50%;
+  border: 1px dashed rgba(212,138,77,0.25);
+  animation: spin 80s linear infinite;
+  pointer-events: none;
+}
+.sun-orb b {
+  font: 600 48px/1 'Cormorant Garamond', serif;
+  color: var(--ink);
+}
+.sun-orb span {
+  font-size: 11px; font-weight: 500;
+  text-transform: uppercase; letter-spacing: 1px;
+  color: rgba(74,66,56,0.65);
+  margin-top: 2px;
+}
+
+/* ── Metrics ── */
+.metrics-row {
+  display: flex; justify-content: center; gap: 28px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.metric { text-align: center; }
+.metric b { display: block; font-size: 18px; font-family: 'Cormorant Garamond', serif; }
+.metric span { font-size: 10px; color: var(--ink-light); text-transform: uppercase; letter-spacing: 0.5px; }
+
+/* ── Sol ── */
+.sol-card { display: flex; align-items: center; gap: 14px; }
+.sol-avatar {
+  width: 60px; height: 60px;
+  background: var(--sun-light);
+  border-radius: 30px 30px 6px 30px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 30px; flex-shrink: 0;
+  animation: float 4.5s ease-in-out infinite;
+}
+.sol-info { flex: 1; min-width: 0; }
+.sol-info h3 { margin-bottom: 2px; }
+.sol-info .sub { margin-bottom: 6px; font-size: 13px; }
+.xp-bar-track { height: 3px; background: rgba(74,66,56,0.06); border-radius: 2px; overflow: hidden; }
+.xp-bar-fill { height: 100%; background: var(--sun); border-radius: 2px; transition: width 0.5s cubic-bezier(0.16,1,0.3,1); }
+.xp-label { font-size: 10px; color: var(--ink-light); margin-top: 3px; }
+
+/* ── Mission ── */
+.mission-card { text-align: center; padding: 14px 16px; }
+.mission-tag {
+  font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px;
+  color: var(--leaf); margin-bottom: 4px; display: block;
+}
+.mission-text { font-size: 14px; line-height: 1.5; }
+
+/* ═══ Session Overlay ═══ */
+.session-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  background: radial-gradient(circle at 50% 38%, var(--sun-light) 0%, var(--sun) 55%, var(--amber) 100%);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; padding: 24px 20px;
+  overflow: hidden;
+}
+
+/* Slow rotating light rays — purely decorative */
+.session-overlay::before {
+  content: '';
+  position: absolute;
+  width: 250vmax; height: 250vmax;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  background: repeating-conic-gradient(from 0deg, transparent 0deg 12deg, rgba(255,255,255,0.06) 12deg 24deg);
+  animation: spin 200s linear infinite;
+  pointer-events: none;
+}
+
+.session-overlay h1,
+.session-overlay h2,
+.session-overlay p,
+.session-overlay .card,
+.session-overlay button,
+.session-overlay video { position: relative; z-index: 2; }
+
+.session-overlay h1 { font-size: 24px; margin-bottom: 8px; }
+.session-overlay h2 { font-size: 20px; margin-bottom: 8px; }
+.session-overlay p { font-size: 15px; max-width: 280px; color: rgba(74,66,56,0.8); }
+
+.session-overlay button {
+  background: rgba(255,255,255,0.3);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255,255,255,0.45);
+  color: var(--ink); width: auto; min-width: 180px;
+  padding: 16px 32px; font-size: 15px;
+}
+.session-overlay button:active { background: rgba(255,255,255,0.45); }
+
+.session-overlay video { border-radius: 14px; margin-top: 12px; }
+
+.suncheck-bg {
+  background: radial-gradient(circle at 50% 38%, #fef5d4 0%, #f0e4c8 60%, #e0cfa8 100%);
+}
+
+/* Sun icon in active session — no box, just a glow that lives in the background */
+.session-sun-icon {
+  font-size: 80px;
+  position: relative; z-index: 2;
+  filter: drop-shadow(0 0 30px rgba(244,208,104,0.6));
+  animation: sunGlow 4s ease-in-out infinite;
+  margin-bottom: 20px;
+}
+
+.session-timer {
+  font: 400 28px/1 'Cormorant Garamond', serif;
+  color: rgba(74,66,56,0.4);
+  position: relative; z-index: 2;
+  margin-top: 16px;
+  letter-spacing: 2px;
+}
+
+/* ── Gate ── */
+.gate-apps { display: flex; flex-direction: column; gap: 10px; }
+.gate-btn { font-size: 16px; padding: 18px; }
+.gate-flow { text-align: center; }
+.gate-step-content { padding: 32px 0; }
+
+.breath-circle {
+  width: 140px; height: 140px;
+  border-radius: 50%;
+  background: var(--sun-light);
+  border: 1.5px solid rgba(244,208,104,0.5);
+  display: flex; align-items: center; justify-content: center;
+  font: 500 40px/1 'Cormorant Garamond', serif;
+  color: var(--ink);
+  margin: 24px auto;
+  transition: transform 4s ease-in-out, background-color 4s ease;
+}
+
+.gate-spend-display {
+  font: 500 56px/1 'Cormorant Garamond', serif;
+  color: var(--ink); margin: 20px 0 6px;
+}
+
+.gate-slider {
+  -webkit-appearance: none; appearance: none;
+  width: 100%; height: 3px;
+  background: rgba(74,66,56,0.1); border-radius: 2px; outline: none;
+}
+.gate-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 24px; height: 24px; border-radius: 50%;
+  background: var(--sun); cursor: pointer;
+  box-shadow: 0 1px 6px rgba(0,0,0,0.1);
+}
+
+.note { font-size: 14px; color: var(--ink-light); }
+
+/* ── Debrief ── */
+.debrief-hero { text-align: center; padding: 8px 0; }
+.debrief-number { font: 600 48px/1 'Cormorant Garamond', serif; color: var(--ink); }
+.debrief-number.secondary-number { font-size: 36px; margin-top: 16px; }
+.debrief-label {
+  font-size: 12px; color: var(--ink-light);
+  text-transform: uppercase; letter-spacing: 0.5px;
+  margin-top: 4px; margin-bottom: 4px;
+}
+.debrief-details { display: flex; flex-direction: column; gap: 12px; }
+.debrief-row { display: flex; justify-content: space-between; align-items: center; font-size: 14px; }
+.debrief-row span { color: var(--ink-light); }
+.debrief-row b { font-weight: 500; }
+
+/* ── Spike ── */
+.spike-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.spike-grid button { font-size: 13px; padding: 12px 8px; border-radius: 12px; }
+
+.spike-log {
+  background: var(--ink);
+  color: rgba(255,255,255,0.75);
+  font: 11px/1.6 ui-monospace, 'SF Mono', monospace;
+  border-radius: 12px;
+  padding: 12px 14px;
+  max-height: 240px;
+  overflow-y: auto;
+  margin-top: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ═══ Navigation ═══ */
+nav {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  height: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px));
+  background: rgba(253,251,247,0.92);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  border-top: 1px solid var(--border);
+  display: flex; align-items: flex-start;
+  padding: 0;
+  z-index: 100;
+}
+
+.nav-btn {
+  flex: 1;
+  background: transparent;
+  border-radius: 0;
+  height: var(--nav-h);
+  padding: 10px 0 0;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--ink-light);
+  transition: color 0.2s ease;
+  position: relative;
+}
+.nav-btn.on { color: var(--ink); }
+
+/* Active dot indicator */
+.nav-btn.on::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 50%;
+  transform: translateX(-50%);
+  width: 18px; height: 2px;
+  border-radius: 1px;
+  background: var(--sun);
+}
+
+.nav-icon { font-size: 18px; display: block; line-height: 1; }
+.nav-label { font-size: 10px; font-weight: 500; letter-spacing: 0.3px; line-height: 1; margin-top: 2px; }
+
+/* Remove the old ::after dot */
+.nav-btn.on .nav-label::after { display: none; }
+
+/* ── Limitations ── */
+.limitations {
+  font-size: 11px; color: var(--ink-light);
+  text-align: center; padding: 16px 8px;
+  line-height: 1.6; opacity: 0.6;
+  margin-top: 4px;
+}
+
+/* ── Animations ── */
+@keyframes spin { to { transform: translate(-50%, -50%) rotate(360deg); } }
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+@keyframes orbPulse {
+  0%, 100% { box-shadow: 0 0 40px -8px rgba(244,208,104,0.45); }
+  50% { box-shadow: 0 0 50px -4px rgba(244,208,104,0.55); }
+}
+@keyframes sunGlow {
+  0%, 100% { filter: drop-shadow(0 0 30px rgba(244,208,104,0.5)); }
+  50% { filter: drop-shadow(0 0 50px rgba(244,208,104,0.75)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sun-orb, .sun-orb::after, .sol-avatar,
+  .session-overlay::before, .session-sun-icon,
+  .breath-circle {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* Slightly wider padding on tablets */
+@media (min-width: 440px) {
+  main { max-width: 420px; padding-left: 20px; padding-right: 20px; }
+}

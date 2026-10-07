@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <radialGradient id="center" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#d48a4d"/>
+      <stop offset="100%" stop-color="#b5703d"/>
+    </radialGradient>
+  </defs>
+  <!-- Petals -->
+  <g transform="translate(100,100)" stroke="#c8884a" stroke-width="1" fill="none" opacity="0.85">
+    <path d="M0,-30 C10,-55 15,-75 0,-90 C-15,-75 -10,-55 0,-30"/>
+    <path d="M0,-30 C10,-55 15,-75 0,-90 C-15,-75 -10,-55 0,-30" transform="rotate(30)"/>
+    <path d="M0,-30 C10,-55 15,-75 0,-90 C-15,-75 -10,-55 0,-30" transform="rotate(60)"/>
+    <path d="M0,-30 C10,-55 15,-75 0,-90 C-15,-75 -10,-55 0,-30" transform="rotate(90)"/>
+    <path d="M0,-30 C10,-55 15,-75 0,-90 C-15,-75 -10,-55 0,-30" transform="rotate(120)"/>
+    <path d="M0,-30 C10,-55 15,-75 0,-90 C-15,-75 -10,-55 0,-30" transform="rotate(150)"/>
+    <path d="M0,-30 C10,-55 15,-75 0,-90 C-15,-75 -10,-55 0,-30" transform="rotate(180)"/>
+    <path d="M0,-30 C10,-55 15,-75 0,-90 C-15,-75 -10,-55 0,-30" transform="rotate(210)"/>
+    <path d="M0,-30 C10,-55 15,-75 0,-90 C-15,-75 -10,-55 0,-30" transform="rotate(240)"/>
+    <path d="M0,-30 C10,-55 15,-75 0,-90 C-15,-75 -10,-55 0,-30" transform="rotate(270)"/>
+    <path d="M0,-30 C10,-55 15,-75 0,-90 C-15,-75 -10,-55 0,-30" transform="rotate(300)"/>
+    <path d="M0,-30 C10,-55 15,-75 0,-90 C-15,-75 -10,-55 0,-30" transform="rotate(330)"/>
+  </g>
+  <!-- Rays -->
+  <g transform="translate(100,100)" stroke="#c8884a" stroke-width="0.8" opacity="0.5">
+    <line x1="0" y1="-92" x2="0" y2="-105"/>
+    <line x1="0" y1="-92" x2="0" y2="-105" transform="rotate(15)"/>
+    <line x1="0" y1="-92" x2="0" y2="-105" transform="rotate(30)"/>
+    <line x1="0" y1="-92" x2="0" y2="-105" transform="rotate(45)"/>
+    <line x1="0" y1="-92" x2="0" y2="-105" transform="rotate(60)"/>
+    <line x1="0" y1="-92" x2="0" y2="-105" transform="rotate(75)"/>
+    <line x1="0" y1="-92" x2="0" y2="-105" transform="rotate(90)"/>
+    <line x1="0" y1="-92" x2="0" y2="-105" transform="rotate(105)"/>
+    <line x1="0" y1="-92" x2="0" y2="-105" transform="rotate(120)"/>
+    <line x1="0" y1="-92" x2="0" y2="-105" transform="rotate(135)"/>
+    <line x1="0" y1="-92" x2="0" y2="-105" transform="rotate(150)"/>
+    <line x1="0" y1="-92" x2="0" y2="-105" transform="rotate(165)"/>
+    <line x1="0" y1="-92" x2="0" y2="-105" transform="rotate(180)"/>
+    <line x1="0" y1="-92" x2="0" y2="-105" transform="rotate(195)"/>
+    <line x1="0" y1="-92" x2="0" y2="-105" transform="rotate(210)"/>
+    <line x1="0" y1="-92" x2="0" y2="-105" transform="rotate(225)"/>
+    <line x1="0" y1="-92" x2="0" y2="-105" transform="rotate(240)"/>
+    <line x1="0" y1="-92" x2="0" y2="-105" transform="rotate(255)"/>
+    <line x1="0" y1="-92" x2="0" y2="-105" transform="rotate(270)"/>
+    <line x1="0" y1="-92" x2="0" y2="-105" transform="rotate(285)"/>
+    <line x1="0" y1="-92" x2="0" y2="-105" transform="rotate(300)"/>
+    <line x1="0" y1="-92" x2="0" y2="-105" transform="rotate(315)"/>
+    <line x1="0" y1="-92" x2="0" y2="-105" transform="rotate(330)"/>
+    <line x1="0" y1="-92" x2="0" y2="-105" transform="rotate(345)"/>
+  </g>
+  <!-- Center -->
+  <circle cx="100" cy="100" r="28" fill="url(#center)"/>
+</svg>

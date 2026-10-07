@@ -1,0 +1,16 @@
+{
+  "name": "SUNDEBT",
+  "short_name": "SunDebt",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#e9f1f5",
+  "theme_color": "#e9f1f5",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
