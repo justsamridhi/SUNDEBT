@@ -15,6 +15,14 @@ const fallbackMissions = [
 
 export type SolGuidance = SolMission & { source: 'ai' | 'fallback' };
 
+export function parseSolMissionResponse(response: { object?: unknown; text: string }): SolMission {
+  const structured = solMissionSchema.safeParse(response.object);
+  if (structured.success) return structured.data;
+
+  const jsonText = response.text.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1] ?? response.text;
+  return solMissionSchema.parse(JSON.parse(jsonText));
+}
+
 export function fallbackMission(input: SolMissionInput): SolGuidance {
   const previousMissions = new Set(input.recentSessions.map(session => session.mission));
   const index = input.recentSessions.length % fallbackMissions.length;
@@ -79,13 +87,13 @@ export async function getSolGuidance(input: SolMissionInput): Promise<SolGuidanc
       {
         structuredOutput: {
           schema: solMissionSchema,
-          jsonPromptInjection: 'auto',
+          jsonPromptInjection: true,
         },
         abortSignal: AbortSignal.timeout(12_000),
       },
     );
 
-    return { ...solMissionSchema.parse(response.object), source: 'ai' };
+    return { ...parseSolMissionResponse(response), source: 'ai' };
   } catch (error) {
     console.warn('Sol AI unavailable; using deterministic mission fallback:', error);
     return fallback;
