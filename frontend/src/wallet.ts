@@ -73,11 +73,11 @@ export const SOL_STAGES = [
 export const MISSIONS = [
   'Spend 5 minutes outside without your phone.',
   'Notice three things you normally overlook.',
-  'Take a different route today.',
-  'Sit in the sun for 10 minutes, doing nothing.',
-  'Find something growing near you.',
+  'Take a short walk in a familiar, comfortable place.',
+  'Sit somewhere comfortable outdoors for 10 minutes.',
+  'Notice a plant or tree from a safe public place.',
   'Listen to the sounds around you for 2 minutes.',
-  'Walk barefoot on grass for a minute.',
+  'Walk on a path or paved area that feels comfortable.',
   'Watch the sky change for 5 minutes.',
 ];
 

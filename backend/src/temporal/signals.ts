@@ -8,9 +8,14 @@ import type {
 } from '../contracts.js';
 import type { SunSessionState } from './sun-session.workflow.js';
 
-export const sunCheckCompletedSignal = defineSignal<[SunCheckEvidence]>('sunCheckCompleted');
-export const phoneDownSignal = defineSignal('phoneDown');
-export const interruptedSignal = defineSignal('sessionInterrupted');
-export const resumedSignal = defineSignal('sessionResumed');
-export const sessionCompletedSignal = defineSignal<[SessionCompletion]>('sessionCompleted');
+export type IdentifiedSessionEvent<T = undefined> = {
+  eventId: string;
+  data: T;
+};
+
+export const sunCheckCompletedSignal = defineSignal<[IdentifiedSessionEvent<SunCheckEvidence>]>('sunCheckCompleted');
+export const phoneDownSignal = defineSignal<[IdentifiedSessionEvent]>('phoneDown');
+export const interruptedSignal = defineSignal<[IdentifiedSessionEvent]>('sessionInterrupted');
+export const resumedSignal = defineSignal<[IdentifiedSessionEvent]>('sessionResumed');
+export const sessionCompletedSignal = defineSignal<[IdentifiedSessionEvent<SessionCompletion>]>('sessionCompleted');
 export const sessionStateQuery = defineQuery<SunSessionState>('sessionState');

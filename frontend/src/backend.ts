@@ -7,27 +7,23 @@ export type SolGuidance = {
   source: 'ai' | 'fallback';
 };
 
-type MissionContext = {
+export type MissionContext = {
   sunDebt: number;
   sunMinutes: number;
-  recentSessions: {
-    duration: number;
-    steps: number | null;
-    earned: number;
-    mission: string;
-    conf: 'confirmed' | 'estimated' | 'unavailable';
-  }[];
+  recentSessionDurations: number[];
   timeOfDay: string;
 };
+
+const sessionStartRequests = new Map<string, Promise<{ workflowId: string; guidance?: SolGuidance }>>();
 
 function apiUrl(path: string): string {
   const base = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8787';
   return `${base.replace(/\/$/, '')}${path}`;
 }
 
-async function postJson<T>(path: string, body: unknown): Promise<T> {
+async function postJson<T>(path: string, body: unknown, timeoutMs = 3_000): Promise<T> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 3_000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(apiUrl(path), {
       method: 'POST',
@@ -48,13 +44,7 @@ export function createMissionContext(wallet: Wallet): MissionContext {
   return {
     sunDebt: wallet.sunDebt,
     sunMinutes: wallet.sunMinutes,
-    recentSessions: wallet.sessions.slice(0, 8).map(session => ({
-      duration: session.duration,
-      steps: session.steps,
-      earned: session.earned,
-      mission: session.mission,
-      conf: session.conf,
-    })),
+    recentSessionDurations: wallet.sessions.slice(0, 3).map(session => session.duration),
     timeOfDay: new Intl.DateTimeFormat(undefined, {
       hour: 'numeric',
       minute: '2-digit',
@@ -72,31 +62,36 @@ export function localGuidance(wallet: Wallet): SolGuidance {
   };
 }
 
-export async function requestSolGuidance(wallet: Wallet): Promise<SolGuidance> {
-  const fallback = localGuidance(wallet);
-  try {
-    const guidance = await postJson<SolGuidance>('/api/sol/mission', createMissionContext(wallet));
-    if (
-      typeof guidance.mission !== 'string' ||
-      typeof guidance.motivation !== 'string' ||
-      !Number.isInteger(guidance.recommendedDurationMinutes) ||
-      (guidance.source !== 'ai' && guidance.source !== 'fallback')
-    ) {
-      throw new Error('SUNDEBT API returned invalid mission guidance');
-    }
-    return guidance;
-  } catch (error) {
-    console.warn('Sol guidance unavailable; using local mission fallback:', error);
-    return fallback;
-  }
-}
+export async function startSunSession(
+  sessionId: string,
+  missionContext: MissionContext,
+): Promise<{ workflowId: string; guidance?: SolGuidance }> {
+  const existingRequest = sessionStartRequests.get(sessionId);
+  if (existingRequest) return existingRequest;
 
-export async function startSunSession(guidance: SolGuidance): Promise<string> {
-  const result = await postJson<{ workflowId: string }>('/api/sessions/start', { guidance });
+  const request = postJson<{ workflowId: string; guidance?: SolGuidance }>(
+    '/api/sessions/start',
+    { sessionId, missionContext },
+    25_000,
+  ).then(result => {
   if (typeof result.workflowId !== 'string' || !result.workflowId.startsWith('sundebt-session-')) {
     throw new Error('SUNDEBT API returned an invalid workflow id');
   }
-  return result.workflowId;
+  if (
+    result.guidance &&
+    (typeof result.guidance.mission !== 'string' ||
+      typeof result.guidance.motivation !== 'string' ||
+      !Number.isInteger(result.guidance.recommendedDurationMinutes) ||
+      result.guidance.recommendedDurationMinutes < 5 ||
+      result.guidance.recommendedDurationMinutes > 60 ||
+      (result.guidance.source !== 'ai' && result.guidance.source !== 'fallback'))
+  ) {
+    throw new Error('SUNDEBT API returned invalid mission guidance');
+  }
+  return result;
+  });
+  sessionStartRequests.set(sessionId, request);
+  return request;
 }
 
 export type SessionEvent =
@@ -113,12 +108,18 @@ export type SessionEvent =
   | { type: 'resumed' };
 
 export function sendSessionEvent(workflowId: string, event: SessionEvent): Promise<{ accepted: boolean }> {
-  return postJson(`/api/sessions/${encodeURIComponent(workflowId)}/events`, event);
+  return postJson(`/api/sessions/${encodeURIComponent(workflowId)}/events`, {
+    ...event,
+    eventId: crypto.randomUUID(),
+  });
 }
 
 export function completeSunSession(
   workflowId: string,
   completion: { durationMinutes: number; steps: number | null; earnedToday: number; sunDebt: number },
 ): Promise<{ accepted: boolean }> {
-  return postJson(`/api/sessions/${encodeURIComponent(workflowId)}/complete`, completion);
+  return postJson(`/api/sessions/${encodeURIComponent(workflowId)}/complete`, {
+    ...completion,
+    eventId: crypto.randomUUID(),
+  });
 }

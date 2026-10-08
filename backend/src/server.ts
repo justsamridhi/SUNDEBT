@@ -1,15 +1,13 @@
 import 'dotenv/config';
-import { randomUUID } from 'node:crypto';
 import cors from 'cors';
 import express, { type ErrorRequestHandler, type Response } from 'express';
+import { WorkflowIdReusePolicy } from '@temporalio/common';
 import { z } from 'zod';
 import {
-  sessionCompletionSchema,
+  sessionCompletionEventSchema,
+  sessionEventSchema,
   sessionStartSchema,
-  solMissionInputSchema,
-  sunCheckEvidenceSchema,
 } from './contracts.js';
-import { getSolGuidance } from './sol/sol-service.js';
 import { getTaskQueue, getTemporalClient } from './temporal/client.js';
 import {
   interruptedSignal,
@@ -22,7 +20,7 @@ import {
 import type { SessionReward } from './contracts.js';
 
 const app = express();
-const workflowIdSchema = z.string().regex(/^sundebt-session-[0-9a-f-]{36}$/i);
+const workflowIdSchema = z.string().regex(/^sundebt-session-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
 const allowedOrigins = process.env.CORS_ORIGIN
   ?.split(',')
   .map(origin => origin.trim())
@@ -40,16 +38,6 @@ app.get('/api/health', (_request, response) => {
   });
 });
 
-app.post('/api/sol/mission', async (request, response) => {
-  const input = solMissionInputSchema.safeParse(request.body);
-  if (!input.success) {
-    response.status(400).json({ error: 'Invalid mission context', details: input.error.issues });
-    return;
-  }
-
-  response.json(await getSolGuidance(input.data));
-});
-
 app.post('/api/sessions/start', async (request, response, next) => {
   const body = sessionStartSchema.safeParse(request.body);
   if (!body.success) {
@@ -57,15 +45,40 @@ app.post('/api/sessions/start', async (request, response, next) => {
     return;
   }
 
-  const workflowId = `sundebt-session-${randomUUID()}`;
+  const workflowId = `sundebt-session-${body.data.sessionId}`;
   try {
     const client = await getTemporalClient();
-    await client.workflow.start('sunSessionWorkflow', {
-      workflowId,
-      taskQueue: getTaskQueue(),
-      args: [{ sessionId: workflowId, guidance: body.data.guidance }],
-    });
-    response.status(201).json({ workflowId });
+    try {
+      await client.workflow.start('sunSessionWorkflow', {
+        workflowId,
+        workflowIdReusePolicy: WorkflowIdReusePolicy.REJECT_DUPLICATE,
+        taskQueue: getTaskQueue(),
+        args: [{
+          sessionId: workflowId,
+          missionContext: body.data.missionContext,
+        }],
+      });
+    } catch (error) {
+      if (error instanceof Error && error.name === 'WorkflowExecutionAlreadyStartedError') {
+        const workflow = client.workflow.getHandle(workflowId);
+        const state = await workflow.query(sessionStateQuery);
+        response.status(200).json({ workflowId, guidance: state.guidance });
+        return;
+      }
+      throw error;
+    }
+
+    const workflow = client.workflow.getHandle(workflowId);
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline) {
+      const state = await workflow.query(sessionStateQuery);
+      if (state.guidance) {
+        response.status(200).json({ workflowId, guidance: state.guidance });
+        return;
+      }
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
+    response.status(202).json({ workflowId });
   } catch (error) {
     next(error);
   }
@@ -74,27 +87,30 @@ app.post('/api/sessions/start', async (request, response, next) => {
 app.post('/api/sessions/:id/events', async (request, response, next) => {
   const workflowId = parseWorkflowId(request.params.id, response);
   if (!workflowId) return;
-  const eventSchema = expressEventSchema.safeParse(request.body);
-  if (!eventSchema.success) {
-    response.status(400).json({ error: 'Invalid session event', details: eventSchema.error.issues });
+  const event = sessionEventSchema.safeParse(request.body);
+  if (!event.success) {
+    response.status(400).json({ error: 'Invalid session event', details: event.error.issues });
     return;
   }
 
   try {
     const client = await getTemporalClient();
     const workflow = client.workflow.getHandle(workflowId);
-    switch (eventSchema.data.type) {
+    switch (event.data.type) {
       case 'sun-check':
-        await workflow.signal(sunCheckCompletedSignal, eventSchema.data.evidence);
+        await workflow.signal(sunCheckCompletedSignal, {
+          eventId: event.data.eventId,
+          data: event.data.evidence,
+        });
         break;
       case 'phone-down':
-        await workflow.signal(phoneDownSignal);
+        await workflow.signal(phoneDownSignal, { eventId: event.data.eventId, data: undefined });
         break;
       case 'interrupted':
-        await workflow.signal(interruptedSignal);
+        await workflow.signal(interruptedSignal, { eventId: event.data.eventId, data: undefined });
         break;
       case 'resumed':
-        await workflow.signal(resumedSignal);
+        await workflow.signal(resumedSignal, { eventId: event.data.eventId, data: undefined });
         break;
     }
     response.status(202).json({ accepted: true });
@@ -106,7 +122,7 @@ app.post('/api/sessions/:id/events', async (request, response, next) => {
 app.post('/api/sessions/:id/complete', async (request, response, next) => {
   const workflowId = parseWorkflowId(request.params.id, response);
   if (!workflowId) return;
-  const completion = sessionCompletionSchema.safeParse(request.body);
+  const completion = sessionCompletionEventSchema.safeParse(request.body);
   if (!completion.success) {
     response.status(400).json({ error: 'Invalid session completion', details: completion.error.issues });
     return;
@@ -115,7 +131,26 @@ app.post('/api/sessions/:id/complete', async (request, response, next) => {
   try {
     const client = await getTemporalClient();
     const workflow = client.workflow.getHandle(workflowId);
-    await workflow.signal(sessionCompletedSignal, completion.data);
+    const currentState = await workflow.query(sessionStateQuery);
+    if (currentState.reward) {
+      response.status(200).json({ status: 'already-completed' });
+      return;
+    }
+    const { eventId, ...completionData } = completion.data;
+    try {
+      await workflow.signal(sessionCompletedSignal, { eventId, data: completionData });
+    } catch (error) {
+      if (
+        !(error instanceof Error) ||
+        !['WorkflowExecutionAlreadyCompletedError', 'WorkflowNotFoundError'].includes(error.name)
+      ) {
+        throw error;
+      }
+      const completedState = await workflow.query(sessionStateQuery);
+      if (!completedState.reward) throw error;
+      response.status(200).json({ status: 'already-completed' });
+      return;
+    }
 
     const rewardPromise: Promise<SessionReward> = workflow.result();
     let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -124,7 +159,7 @@ app.post('/api/sessions/:id/complete', async (request, response, next) => {
     });
     const reward = await Promise.race([rewardPromise, timeoutPromise]);
     if (timeout) clearTimeout(timeout);
-    response.status(reward ? 200 : 202).json({ accepted: true, reward });
+    response.status(reward ? 200 : 202).json(reward ? { accepted: true, reward } : { accepted: true });
   } catch (error) {
     next(error);
   }
@@ -142,18 +177,9 @@ app.get('/api/sessions/:id', async (request, response, next) => {
   }
 });
 
-const expressEventSchema = z.discriminatedUnion('type', [
-  z.object({
-    type: z.literal('sun-check'),
-    evidence: sunCheckEvidenceSchema,
-  }),
-  z.object({ type: z.literal('phone-down') }),
-  z.object({ type: z.literal('interrupted') }),
-  z.object({ type: z.literal('resumed') }),
-]);
-
-const handleApiError: ErrorRequestHandler = (error, _request, response, _next) => {
-  console.error('SUNDEBT API request failed:', error);
+const handleApiError: ErrorRequestHandler = (error, request, response, _next) => {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`[api] 503 route=${request.path} message=${message}`);
   if (response.headersSent) return;
   response.status(503).json({
     error: 'Session workflow is temporarily unavailable. The frontend can continue locally.',
@@ -172,6 +198,23 @@ function parseWorkflowId(value: string, response: Response): string | undefined 
 app.use(handleApiError);
 
 const port = Number(process.env.PORT ?? 8787);
+function warmUpOllama(): void {
+  const baseUrl = process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434/api';
+  const model = 'llama3.2:3b';
+  void fetch(`${baseUrl}/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model,
+      prompt: 'Reply with OK.',
+      stream: false,
+      options: { num_predict: 1, num_ctx: 256 },
+    }),
+  }).catch(error => {
+    console.warn('[sol] Ollama warm-up unavailable:', error instanceof Error ? error.message : String(error));
+  });
+}
+warmUpOllama();
 app.listen(port, () => {
   console.info(`SUNDEBT API listening on http://localhost:${port}`);
 });

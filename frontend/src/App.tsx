@@ -1,7 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  Camera, Compass, Eye, Leaf, Lightbulb,
+  LockKeyhole, Smartphone, Sprout, Sun, Volume2,
+} from 'lucide-react';
 import { useStepCounter, useVisibility, useLightSensor, useCameraCheck } from './hooks';
 import {
-  completeSunSession, localGuidance, requestSolGuidance, sendSessionEvent, startSunSession,
+  completeSunSession, createMissionContext, localGuidance, sendSessionEvent, startSunSession,
   type SessionEvent, type SolGuidance,
 } from './backend';
 import {
@@ -18,6 +22,48 @@ const SITES: Record<string, string> = {
 
 type Tab = 'earn' | 'gate' | 'debrief' | 'spike';
 type SessionPhase = 'idle' | 'suncheck' | 'conditions' | 'active' | 'complete';
+
+const BRAND_ART = {
+  earn: '/assets/sundebt/sundebt-earn.png',
+  gate: '/assets/sundebt/sundebt-gate.png',
+  spike: '/assets/sundebt/sundebt-spike.png',
+  debrief: '/assets/sundebt/sundebt-debrief.png',
+} as const;
+
+function BrandArtwork({ kind, alt }: { kind: keyof typeof BRAND_ART; alt: string }) {
+  return <img className={`brand-art brand-art-${kind}`} src={BRAND_ART[kind]} alt={alt} />;
+}
+
+const FALLING_LEAVES = [
+  ['01', 'leaf-a'],
+  ['02', 'leaf-b'],
+  ['03', 'leaf-c'],
+  ['04', 'leaf-d'],
+  ['05', 'leaf-e'],
+  ['01', 'leaf-f'],
+  ['03', 'leaf-g'],
+  ['04', 'leaf-h'],
+  ['02', 'leaf-i'],
+  ['05', 'leaf-j'],
+  ['01', 'leaf-k'],
+] as const;
+
+function FallingLeaves() {
+  return (
+    <div className="falling-leaves" aria-hidden="true">
+      {FALLING_LEAVES.map(([asset, position]) => (
+        <img
+          key={position}
+          className={`falling-leaf ${position}`}
+          src={`/assets/sundebt/sundebt-leaf-${asset}.png`}
+          alt=""
+        />
+      ))}
+      <img className="falling-sparkle sparkle-a" src="/assets/sundebt/sundebt-sparkle-01.png" alt="" />
+      <img className="falling-sparkle sparkle-b" src="/assets/sundebt/sundebt-sparkle-01.png" alt="" />
+    </div>
+  );
+}
 
 export default function App() {
   const [tab, setTab] = useState<Tab>('earn');
@@ -39,14 +85,20 @@ export default function App() {
   const [isPaused, setIsPaused] = useState(false);
   const [camLum, setCamLum] = useState<number | null>(null);
   const [workflowWarning, setWorkflowWarning] = useState<string | null>(null);
+  const [startPending, setStartPending] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const elapsedBeforeSegment = useRef(0);
   const activeSegmentStart = useRef(0);
-  const workflowIdRef = useRef<string | null>(null);
-  const workflowSetupRef = useRef<Promise<void>>(Promise.resolve());
+  const workflowSetupRef = useRef<Promise<string | null>>(Promise.resolve(null));
   const workflowActionsRef = useRef<Promise<void>>(Promise.resolve());
+  const missionTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const missionResolvedRef = useRef(false);
+  const sessionStartedRef = useRef(false);
+  const sessionIdRef = useRef<string | null>(null);
   const currentMission = guidance.mission;
+
+  useEffect(() => () => clearTimeout(missionTimerRef.current), []);
 
   // Elapsed timer during active session
   useEffect(() => {
@@ -81,10 +133,10 @@ export default function App() {
   }, [phase, camera.supported, camera.startCamera, camera.stopCamera, camera.measureLuminance]);
 
   const queueWorkflowEvent = (event: SessionEvent) => {
+    const setup = workflowSetupRef.current;
     workflowActionsRef.current = workflowActionsRef.current
       .then(async () => {
-        await workflowSetupRef.current;
-        const workflowId = workflowIdRef.current;
+        const workflowId = await setup;
         if (workflowId) await sendSessionEvent(workflowId, event);
       })
       .catch(error => {
@@ -95,22 +147,41 @@ export default function App() {
 
   // ─── Session Flow ───
   const beginSunCheck = () => {
+    if (sessionIdRef.current || startPending) return;
+    const sessionId = crypto.randomUUID();
+    sessionIdRef.current = sessionId;
+    setStartPending(true);
     if (camera.supported && videoRef.current) {
       void camera.startCamera(videoRef.current);
     }
     setPhase('suncheck');
     setCamLum(null);
     setWorkflowWarning(null);
-    workflowIdRef.current = null;
     workflowActionsRef.current = Promise.resolve();
+    missionResolvedRef.current = false;
+    sessionStartedRef.current = false;
+    clearTimeout(missionTimerRef.current);
+    missionTimerRef.current = setTimeout(() => {
+      if (!missionResolvedRef.current && !sessionStartedRef.current) {
+        setGuidance(localGuidance(w));
+        missionResolvedRef.current = true;
+      }
+    }, 20_000);
     workflowSetupRef.current = (async () => {
-      const nextGuidance = await requestSolGuidance(w);
-      setGuidance(nextGuidance);
       try {
-        workflowIdRef.current = await startSunSession(nextGuidance);
+        const result = await startSunSession(sessionId, createMissionContext(w));
+        if (result.guidance && !missionResolvedRef.current && !sessionStartedRef.current) {
+          clearTimeout(missionTimerRef.current);
+          setGuidance(result.guidance);
+          missionResolvedRef.current = true;
+        }
+        return result.workflowId;
       } catch (error) {
         console.warn('Temporal session unavailable; continuing locally:', error);
         setWorkflowWarning('Durable session unavailable; your Sun Session can still run locally.');
+        return null;
+      } finally {
+        setStartPending(false);
       }
     })();
   };
@@ -129,6 +200,12 @@ export default function App() {
   };
 
   const startActiveSession = () => {
+    if (!missionResolvedRef.current) {
+      clearTimeout(missionTimerRef.current);
+      setGuidance(localGuidance(w));
+      missionResolvedRef.current = true;
+    }
+    sessionStartedRef.current = true;
     elapsedBeforeSegment.current = 0;
     activeSegmentStart.current = Date.now();
     setElapsed(0);
@@ -203,10 +280,10 @@ export default function App() {
     }));
     setGuidance(localGuidance({ ...w, sessions: [log, ...w.sessions] }));
 
+    const setup = workflowSetupRef.current;
     workflowActionsRef.current = workflowActionsRef.current
       .then(async () => {
-        await workflowSetupRef.current;
-        const workflowId = workflowIdRef.current;
+        const workflowId = await setup;
         if (workflowId) {
           await completeSunSession(workflowId, {
             durationMinutes: durationMins,
@@ -221,6 +298,7 @@ export default function App() {
         setWorkflowWarning('The durable reward record is unavailable; your local Sun Minutes and Sol XP were saved.');
       });
 
+    sessionIdRef.current = null;
     setPhase('idle');
     setIsPaused(false);
     setTab('debrief');
@@ -289,32 +367,81 @@ export default function App() {
   // ─── Spike State ───
   const [spikeLog, setSpikeLog] = useState<string[]>([]);
   const addLog = (msg: string) => setSpikeLog(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev].slice(0, 50));
+  const sensorError = (error: unknown) => {
+    const name = error instanceof DOMException ? error.name : error instanceof Error ? error.name : '';
+    return name === 'NotAllowedError' || name === 'SecurityError' ? 'permission denied' : 'failed';
+  };
 
   const testCamera = async () => {
+    if (!navigator.mediaDevices?.getUserMedia) return addLog('Camera: ❌ unsupported');
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
       addLog('Camera: ✅ stream acquired');
       stream.getTracks().forEach(t => t.stop());
-    } catch (e: any) { addLog(`Camera: ❌ ${e.message}`); }
+    } catch (error) {
+      addLog(`Camera: ❌ ${sensorError(error)}${error instanceof Error ? ` (${error.message})` : ''}`);
+    }
   };
-  const testMotion = () => {
+  const testMotion = async () => {
     if (typeof DeviceMotionEvent === 'undefined') return addLog('DeviceMotion: ❌ unsupported');
+    const permissionAwareEvent = DeviceMotionEvent as typeof DeviceMotionEvent & {
+      requestPermission?: () => Promise<'granted' | 'denied'>;
+    };
+    if (permissionAwareEvent.requestPermission) {
+      try {
+        if (await permissionAwareEvent.requestPermission() !== 'granted') {
+          addLog('DeviceMotion: ❌ permission denied');
+          return;
+        }
+      } catch (error) {
+        addLog(`DeviceMotion: ❌ ${sensorError(error)}`);
+        return;
+      }
+    }
+    let resolved = false;
     const h = (e: DeviceMotionEvent) => {
+      resolved = true;
       const a = e.accelerationIncludingGravity;
       addLog(`DeviceMotion: ✅ x=${a?.x?.toFixed(1)} y=${a?.y?.toFixed(1)} z=${a?.z?.toFixed(1)}`);
       window.removeEventListener('devicemotion', h);
     };
     window.addEventListener('devicemotion', h);
-    setTimeout(() => addLog('DeviceMotion: ⏳ waiting for event…'), 100);
+    setTimeout(() => {
+      if (!resolved) {
+        window.removeEventListener('devicemotion', h);
+        addLog('DeviceMotion: ❌ failed (no event received)');
+      }
+    }, 5_000);
   };
-  const testOrientation = () => {
+  const testOrientation = async () => {
     if (typeof DeviceOrientationEvent === 'undefined') return addLog('DeviceOrientation: ❌ unsupported');
+    const permissionAwareEvent = DeviceOrientationEvent as typeof DeviceOrientationEvent & {
+      requestPermission?: () => Promise<'granted' | 'denied'>;
+    };
+    if (permissionAwareEvent.requestPermission) {
+      try {
+        if (await permissionAwareEvent.requestPermission() !== 'granted') {
+          addLog('DeviceOrientation: ❌ permission denied');
+          return;
+        }
+      } catch (error) {
+        addLog(`DeviceOrientation: ❌ ${sensorError(error)}`);
+        return;
+      }
+    }
+    let resolved = false;
     const h = (e: DeviceOrientationEvent) => {
+      resolved = true;
       addLog(`DeviceOrientation: ✅ α=${e.alpha?.toFixed(0)} β=${e.beta?.toFixed(0)} γ=${e.gamma?.toFixed(0)}`);
       window.removeEventListener('deviceorientation', h);
     };
     window.addEventListener('deviceorientation', h);
-    setTimeout(() => addLog('DeviceOrientation: ⏳ waiting…'), 100);
+    setTimeout(() => {
+      if (!resolved) {
+        window.removeEventListener('deviceorientation', h);
+        addLog('DeviceOrientation: ❌ failed (no event received)');
+      }
+    }, 5_000);
   };
   const testLight = () => {
     if (!('AmbientLightSensor' in window)) return addLog('AmbientLight: ❌ unsupported');
@@ -322,20 +449,54 @@ export default function App() {
       // @ts-ignore
       const s = new AmbientLightSensor({ frequency: 1 });
       s.addEventListener('reading', () => { addLog(`AmbientLight: ✅ ${s.illuminance} lux`); s.stop(); });
-      s.addEventListener('error', (e: any) => addLog(`AmbientLight: ❌ ${e.error.message}`));
+      s.addEventListener('error', (event: Event) => {
+        const sensorEvent = event as Event & { error?: DOMException };
+        addLog(`AmbientLight: ❌ ${sensorError(sensorEvent.error)}${sensorEvent.error?.message ? ` (${sensorEvent.error.message})` : ''}`);
+      });
       s.start();
-    } catch (e: any) { addLog(`AmbientLight: ❌ ${e.message}`); }
+    } catch (error) {
+      addLog(`AmbientLight: ❌ ${sensorError(error)}${error instanceof Error ? ` (${error.message})` : ''}`);
+    }
   };
   const testAudio = () => {
+    if (!('AudioContext' in window)) return addLog('WebAudio: ❌ unsupported');
     try {
       const ctx = new AudioContext();
       addLog(`WebAudio: ✅ state=${ctx.state} sampleRate=${ctx.sampleRate}`);
       ctx.close();
-    } catch (e: any) { addLog(`WebAudio: ❌ ${e.message}`); }
+    } catch (error) {
+      addLog(`WebAudio: ❌ ${sensorError(error)}${error instanceof Error ? ` (${error.message})` : ''}`);
+    }
   };
   const testVisibility = () => {
     addLog(`PageVisibility: ✅ hidden=${document.hidden} state=${document.visibilityState}`);
   };
+  const sensorChecks = [
+    { key: 'Camera', label: 'Camera', icon: Camera, test: testCamera },
+    { key: 'DeviceMotion', label: 'Motion', icon: Smartphone, test: testMotion },
+    { key: 'DeviceOrientation', label: 'Orientation', icon: Compass, test: testOrientation },
+    { key: 'AmbientLight', label: 'Light', icon: Lightbulb, test: testLight },
+    { key: 'WebAudio', label: 'Audio', icon: Volume2, test: testAudio },
+    { key: 'PageVisibility', label: 'Visibility', icon: Eye, test: testVisibility },
+  ];
+  const sensorStatus = (key: string) => {
+    const latest = spikeLog.find(line => line.includes(`] ${key}:`));
+    if (!latest) return { label: 'Not tested', className: 'untested' };
+    if (latest.includes('✅')) return { label: 'Available', className: 'available' };
+    if (latest.includes('permission denied')) return { label: 'Permission needed', className: 'permission' };
+    if (latest.includes('unsupported')) return { label: 'Unavailable', className: 'unavailable' };
+    return { label: 'Needs attention', className: 'attention' };
+  };
+  const runAllChecks = async () => {
+    setSpikeLog([]);
+    await testCamera();
+    await testMotion();
+    await testOrientation();
+    testLight();
+    testAudio();
+    testVisibility();
+  };
+  const testedCount = sensorChecks.filter(sensor => sensorStatus(sensor.key).className !== 'untested').length;
 
   // ─── Renders ───
   const sol = getSolStage(w.solXP);
@@ -352,6 +513,8 @@ export default function App() {
         <p className="note" style={{ position: 'relative', zIndex: 2 }}>
           Sensor readings are optional context, not proof that you are outdoors or a health measurement.
         </p>
+        {!missionResolvedRef.current && <p className="note" style={{ position: 'relative', zIndex: 2 }}>Sol is thinking…</p>}
+        <BrandArtwork kind="earn" alt="" />
         <video ref={videoRef} autoPlay playsInline muted style={{ width: '100%', maxWidth: 300, borderRadius: 16, position: 'relative', zIndex: 2, display: camera.supported ? 'block' : 'none' }} />
         {camera.error && (
           <p className="note" style={{ position: 'relative', zIndex: 2 }}>
@@ -360,7 +523,7 @@ export default function App() {
         )}
         {camLum !== null && (
           <p style={{ position: 'relative', zIndex: 2, marginTop: 16 }}>
-            Luminance: <b>{camLum.toFixed(0)}</b>/255 {camLum > 180 ? '— bright ☀️' : camLum > 100 ? '— moderate' : '— low'}
+            Luminance: <b>{camLum.toFixed(0)}</b>/255 {camLum > 180 ? '— bright' : camLum > 100 ? '— moderate' : '— low'}
           </p>
         )}
         <button onClick={proceedToConditions} style={{ marginTop: 24, position: 'relative', zIndex: 2 }}>
@@ -374,8 +537,9 @@ export default function App() {
     return (
       <div className="session-overlay">
         <h2>Before You Go</h2>
+        <BrandArtwork kind="earn" alt="" />
         <div className="card" style={{ textAlign: 'left', maxWidth: 340, margin: '24px auto', background: 'rgba(255,255,255,0.3)' }}>
-          <p style={{ margin: 0 }}>🌿 <b>Mission:</b> {currentMission}</p>
+          <p style={{ margin: 0 }}><Leaf size={16} strokeWidth={1.8} className="inline-icon" aria-hidden="true" /> <b>Mission:</b> {currentMission}</p>
           <p style={{ margin: '8px 0 0' }}>Suggested duration: <b>{guidance.recommendedDurationMinutes} minutes</b></p>
           <p style={{ margin: '8px 0 0' }}>{guidance.motivation}</p>
         </div>
@@ -397,7 +561,7 @@ export default function App() {
   if (phase === 'active') {
     return (
       <div className="session-overlay">
-        <div className="session-sun-icon">☀️</div>
+        <div className="session-sun-icon" aria-hidden="true"><Sun size={74} strokeWidth={1.2} /></div>
         <h1>PUT YOUR PHONE AWAY.</h1>
         <p>GO GET SOME FRESH AIR.</p>
         <div className="session-timer">{fmtTime(elapsed)}</div>
@@ -416,10 +580,17 @@ export default function App() {
 
   return (
     <>
-      <main>
+      <main
+        onPointerMove={event => {
+          const bounds = event.currentTarget.getBoundingClientRect();
+          const shift = ((event.clientX - bounds.left) / bounds.width - 0.5) * 10;
+          event.currentTarget.style.setProperty('--pointer-shift', `${shift.toFixed(1)}px`);
+        }}
+      >
         <video ref={videoRef} autoPlay playsInline muted aria-hidden="true" style={{ display: 'none' }} />
+        <FallingLeaves />
         <header className="app-header">
-          <img src="/icon.svg" alt="SUNDEBT" className="app-logo" />
+          <img src="/assets/sundebt/sundebt-logo.png" alt="SUNDEBT" className="app-logo" />
           <h1>SUNDEBT</h1>
           <p className="sub">Earn Your Screen Time.</p>
         </header>
@@ -450,7 +621,7 @@ export default function App() {
             </div>
 
             <div className="card sol-card">
-              <div className="sol-avatar">{sol.emoji}</div>
+              <div className="sol-avatar" aria-hidden="true"><Sprout size={30} strokeWidth={1.5} /></div>
               <div className="sol-info">
                 <h3>Sol · {sol.name}</h3>
                 <p className="sub">{sol.desc}</p>
@@ -462,13 +633,20 @@ export default function App() {
             </div>
 
             <div className="card mission-card">
-              <span className="mission-tag">Today's Mission</span>
+              <div className="mission-heading">
+                <span className="mission-tag">Today's Mission</span>
+                <span className={`source-badge ${guidance.source}`}>
+                  {guidance.source === 'ai' ? 'Sol · AI' : 'Offline mission'}
+                </span>
+              </div>
               <p className="mission-text">{currentMission}</p>
             </div>
 
             <div className="action-buttons">
-              <button className="primary" onClick={beginSunCheck}>☀️ GET SUN</button>
-              <button className="secondary" onClick={() => setTab('gate')}>🔓 USE MY MINUTES</button>
+              <button className="primary" onClick={beginSunCheck} disabled={startPending}>
+                {startPending ? 'Starting Session…' : <><Sun size={17} strokeWidth={1.8} /> GET SUN</>}
+              </button>
+              <button className="secondary" onClick={() => setTab('gate')}><LockKeyhole size={16} strokeWidth={1.8} /> USE MY MINUTES</button>
             </div>
 
             <div className="limitations">
@@ -492,6 +670,7 @@ export default function App() {
                     Balance: <b>{w.sunMinutes} mins</b>
                   </p>
                 </div>
+                <BrandArtwork kind="gate" alt="Illustration of a botanical threshold" />
                 <div className="gate-apps">
                   {Object.keys(SITES).map(app => (
                     <button
@@ -575,10 +754,11 @@ export default function App() {
               <h2>Session Debrief</h2>
               <p className="sub">Welcome back.</p>
             </div>
+            <BrandArtwork kind="debrief" alt="Illustration of a field-journal debrief" />
             {workflowWarning && <div className="card note" role="status">{workflowWarning}</div>}
             {w.sessions.length === 0 ? (
               <div className="card" style={{ textAlign: 'center' }}>
-                <p className="sol-avatar" style={{ margin: '0 auto 16px', fontSize: 48 }}>🌱</p>
+                <p className="sol-avatar" style={{ margin: '0 auto 16px' }} aria-hidden="true"><Sprout size={42} strokeWidth={1.4} /></p>
                 <p className="sub">No sessions yet.</p>
                 <button className="primary" onClick={() => setTab('earn')} style={{ marginTop: 16 }}>Go Earn Sun Minutes</button>
               </div>
@@ -655,39 +835,62 @@ export default function App() {
           <section className="page-section">
             <div className="section-header">
               <h2>Diagnostic Spike</h2>
-              <p className="sub">Test real browser capabilities before relying on them.</p>
+              <p className="sub">See what your browser can contribute to a Sun Session.</p>
+            </div>
+            <BrandArtwork kind="spike" alt="Illustration of a sunlit sensor crystal" />
+            <div className="spike-intro card">
+              <div>
+                <b>{testedCount === sensorChecks.length ? 'Ready for a Sun Session' : 'Sensor readiness'}</b>
+                <p className="sub">Optional evidence only — sensors never prove that you are outdoors.</p>
+              </div>
+              <span className="spike-count">{testedCount}/{sensorChecks.length}</span>
+            </div>
+            <div className="spike-actions">
+              <button className="primary" onClick={() => void runAllChecks()}>
+                Run all checks
+              </button>
+              <button className="secondary" onClick={() => setSpikeLog([])} disabled={spikeLog.length === 0}>
+                Clear results
+              </button>
             </div>
             <div className="spike-grid">
-              <button className="secondary" onClick={testCamera}>📷 Camera</button>
-              <button className="secondary" onClick={testMotion}>📱 DeviceMotion</button>
-              <button className="secondary" onClick={testOrientation}>🧭 DeviceOrientation</button>
-              <button className="secondary" onClick={testLight}>💡 AmbientLight</button>
-              <button className="secondary" onClick={testAudio}>🔊 Web Audio</button>
-              <button className="secondary" onClick={testVisibility}>👁 Page Visibility</button>
+              {sensorChecks.map(sensor => {
+                const Icon = sensor.icon;
+                const status = sensorStatus(sensor.key);
+                return (
+                  <button key={sensor.key} className={`sensor-check ${status.className}`} onClick={() => void sensor.test()}>
+                    <span className="sensor-check-icon"><Icon size={17} /></span>
+                    <span className="sensor-check-copy"><b>{sensor.label}</b><small>{status.label}</small></span>
+                  </button>
+                );
+              })}
             </div>
             <div className="spike-log">
               {spikeLog.length === 0 ? (
-                <p className="sub">Tap a button above to test.</p>
+                <p className="sub">Run a check to see the browser evidence available on this device.</p>
               ) : (
                 spikeLog.map((line, i) => <div key={i}>{line}</div>)
               )}
             </div>
+            <p className="honesty-note">Bright readings, motion events, and visibility changes are estimates. They do not verify outdoor presence or measure Vitamin D.</p>
           </section>
         )}
       </main>
 
       <nav>
         {([
-          { id: 'earn' as Tab, icon: '☀️', label: 'Earn' },
-          { id: 'gate' as Tab, icon: '🔓', label: 'Gate' },
-          { id: 'debrief' as Tab, icon: '📊', label: 'Debrief' },
-          { id: 'spike' as Tab, icon: '🧪', label: 'Spike' },
-        ]).map(t => (
-          <button key={t.id} className={`nav-btn ${tab === t.id ? 'on' : ''}`} onClick={() => setTab(t.id)}>
-            <span className="nav-icon">{t.icon}</span>
-            <span className="nav-label">{t.label}</span>
-          </button>
-        ))}
+          { id: 'earn' as Tab, art: 'earn' as const, label: 'Earn' },
+          { id: 'gate' as Tab, art: 'gate' as const, label: 'Gate' },
+          { id: 'debrief' as Tab, art: 'debrief' as const, label: 'Debrief' },
+          { id: 'spike' as Tab, art: 'spike' as const, label: 'Spike' },
+        ]).map(t => {
+          return (
+            <button key={t.id} className={`nav-btn ${tab === t.id ? 'on' : ''}`} onClick={() => setTab(t.id)}>
+              <img className="nav-art" src={BRAND_ART[t.art]} alt="" aria-hidden="true" />
+              <span className="nav-label">{t.label}</span>
+            </button>
+          );
+        })}
       </nav>
     </>
   );

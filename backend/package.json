@@ -13,11 +13,12 @@
     "start:worker": "node dist/temporal/worker.js",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx --test src/temporal/reward.test.ts src/sol/sol-service.test.ts"
+    "test": "tsx --test src/temporal/reward.test.ts src/temporal/sol-activity.test.ts src/temporal/event-ledger.test.ts src/sol/sol-service.test.ts"
   },
   "dependencies": {
     "@mastra/core": "^1.75.0",
     "@temporalio/client": "^1.24.0",
+    "@temporalio/common": "^1.24.0",
     "@temporalio/worker": "^1.24.0",
     "@temporalio/workflow": "^1.24.0",
     "cors": "^2.8.5",
