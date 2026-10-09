@@ -200,8 +200,8 @@ app.use(handleApiError);
 const port = Number(process.env.PORT ?? 8787);
 function warmUpOllama(): void {
   const baseUrl = process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434/api';
-  const model = 'llama3.2:3b';
-  void fetch(`${baseUrl}/generate`, {
+  const model = process.env.OLLAMA_MODEL ?? 'llama3:latest';
+  void fetch(`${baseUrl.replace(/\/$/, '')}/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -210,9 +210,15 @@ function warmUpOllama(): void {
       stream: false,
       options: { num_predict: 1, num_ctx: 256 },
     }),
-  }).catch(error => {
-    console.warn('[sol] Ollama warm-up unavailable:', error instanceof Error ? error.message : String(error));
-  });
+  })
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`Ollama returned HTTP ${response.status}`);
+      }
+    })
+    .catch(error => {
+      console.warn('[sol] Ollama warm-up unavailable:', error instanceof Error ? error.message : String(error));
+    });
 }
 warmUpOllama();
 app.listen(port, () => {
