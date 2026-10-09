@@ -119,7 +119,7 @@ function createSolAgent() {
     baseURL: process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434/api',
     compatibility: 'strict',
   });
-  const model = process.env.OLLAMA_MODEL ?? 'llama3:latest';
+  const model = process.env.OLLAMA_MODEL ?? 'llama3.2:3b';
 
   return new Agent({
     id: 'sundebt-sol',

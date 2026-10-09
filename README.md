@@ -6,7 +6,7 @@ SUNDEBT is a behavioral screen-time economy: users earn screen time by choosing 
 
 - **Frontend:** React, TypeScript, and Vite PWA in `frontend/`. The existing browser-local wallet remains the source of truth for Sun Debt, Sun Minutes, Sol XP, and session history.
 - **API:** A small Express service in `backend/` validates mission and session requests. It has no accounts, database, or server-side wallet.
-- **Sol (Mastra):** A Temporal Activity calls the existing Mastra agent with only Sun Minutes, Sun Debt, the last three session durations, and time of day. Structured output is validated for safe, generic guidance; unavailable or invalid model output falls back deterministically. No free-text history or weather context is sent.
+- **Sol (Mastra):** A Temporal Activity calls the existing Mastra agent with only Sun Minutes, Sun Debt, the last three session durations, and time of day. The model returns JSON text that is parsed and validated for safe, generic guidance; unavailable, malformed, invalid, or unsafe model output falls back deterministically. No free-text history or weather context is sent.
 - **Durable sessions (Temporal):** The API starts a `sunSessionWorkflow`; its worker records the Sun Check, phone-down, outdoor-session, interruption/resume, completion, and reward stages as Temporal history. The reward activity applies the existing 90-minute daily cap, 100-step bonus, debt-first repayment, and 2 XP per earned minute. The frontend applies the same reward immediately to its local wallet; the workflow result is a durable session record, not a server-side wallet.
 - **Offline boundaries:** If the API or Temporal is unavailable, the session and local reward still work in the browser. AI failure returns deterministic guidance. A lost API connection can prevent later workflow events from being recorded; this is shown as a local-session warning rather than blocking the user.
 
@@ -16,7 +16,7 @@ SUNDEBT is a behavioral screen-time economy: users earn screen time by choosing 
 - [Ollama](https://ollama.com/) is optional for AI guidance. Install it and pull the default model to enable local inference:
 
   ```sh
-  ollama pull llama3:latest
+  ollama pull llama3.2:3b
   ```
 
 - [Temporal CLI](https://docs.temporal.io/cli) is optional for durable workflow execution. It runs locally without a database container:
@@ -64,7 +64,7 @@ If Ollama is not installed or the model is unavailable, Sol uses a deterministic
 | `PORT` | `8787` | Backend HTTP port |
 | `CORS_ORIGIN` | `http://localhost:5173` in `.env.example` | Comma-separated allowed browser origins; omit to allow any origin for local development |
 | `OLLAMA_BASE_URL` | `http://localhost:11434/api` | Ollama API base URL |
-| `OLLAMA_MODEL` | `llama3:latest` | Local Ollama model used by Mastra |
+| `OLLAMA_MODEL` | `llama3.2:3b` | Local Ollama model used by Mastra and its startup warm-up request |
 | `TEMPORAL_ADDRESS` | `localhost:7233` | Temporal frontend address |
 | `TEMPORAL_NAMESPACE` | `default` | Temporal namespace |
 | `TEMPORAL_TASK_QUEUE` | `sundebt-sun-sessions` | Queue polled by the SUNDEBT worker |
@@ -74,7 +74,7 @@ The backend exposes `GET /api/health`, `POST /api/sessions/start`, `POST /api/se
 
 ## Session workflow
 
-1. The frontend sends a client-generated session ID and the limited mission context to Temporal. The workflow calls the Sol Activity; the API waits for its workflow-query result, while the frontend displays its deterministic local mission after five seconds if no result has arrived. The first selected mission is locked when the user starts the session, so late AI output cannot replace it.
+1. The frontend sends a client-generated session ID and the limited mission context to Temporal. The workflow calls the Sol Activity; the API waits for its workflow-query result, while the frontend displays its deterministic local mission after its fallback window if no result has arrived. The first selected mission is locked when the user starts the session, so late AI output cannot replace it.
 2. Sun Check sends available camera/light readings as optional evidence. These readings never prove outdoor presence or health outcomes.
 3. Starting the timer records phone-down and outdoor-session stages.
 4. The user can explicitly pause and resume; paused time is excluded from the local session duration and the workflow receives interruption/resume signals.
@@ -88,6 +88,7 @@ Temporal persists workflow state and event history, not identity or a cross-devi
 - Step counts are estimates, and camera/ambient-light readings are only optional environmental context. SUNDEBT does not claim to verify outdoor presence or measure Vitamin D.
 - Screen visibility tracking is informational. The web Scroll Gate adds friction before opening a site; it cannot block other installed apps or enforce time spent there.
 - No authentication, database, analytics, or third-party weather service is included. Session history and the wallet remain in browser storage.
+- The backend performs a non-blocking Ollama warm-up request at startup using `OLLAMA_MODEL`. A failed warm-up is logged as a warning and does not prevent the API from starting.
 - Production deployments should explicitly configure `CORS_ORIGIN`, use HTTPS, and run the API, Temporal service, and worker with appropriate operational controls.
 
 ## Checks
